@@ -13,22 +13,29 @@ const upload = multer({ dest: 'uploads/' });
 if (!fs.existsSync('uploads')) fs.mkdirSync('uploads');
 if (!fs.existsSync('outputs')) fs.mkdirSync('outputs');
 
-app.get('/', (req,res)=>{ res.send('EDITOFY AUTO 15 + MANUAL 7 Running - Ready!') });
+app.get('/', (req,res)=>{ 
+  res.send('EDITOFY AUTO 15 + MANUAL 7 Running - Ready!') 
+});
 
 app.post('/auto-edit', upload.single('video'), (req,res)=>{
   const input = req.file.path;
   const output = `outputs/AUTO_${Date.now()}.mp4`;
-  let vf = ['deshake','crop=ih*9/16:ih:(iw-ow)/2:0,scale=1080:1920','eq=saturation=1.4:contrast=1.1','setpts=0.833*PTS','hqdn3d'];
-  let af = ['silenceremove=stop_periods=-1:stop_duration=0.5:stop_threshold=-60dB','loudnorm=I=-16:TP=-1.5:LRA=11','atempo=1.2'];
   try{
-    let manual={}; if(req.body.manual) manual=JSON.parse(req.body.manual);
-    const cta=(manual.ctaText||'Follow for More!').replace(/:/g,'\\:');
-    vf.push(`drawtext=text='${cta}':fontcolor=yellow:fontsize=60:box=1:boxcolor=black@0.8:x=(w-text_w)/2:y=h-th-150:enable='gte(t\\,duration-3)'`);
-    ffmpeg(input).videoFilters(vf.join(',')).audioFilters(af.join(',')).videoBitrate('4000k').outputOptions(['-preset','ultrafast']).output(output)
-      .on('end',()=>res.download(output,()=>{try{fs.unlinkSync(output);fs.unlinkSync(input);}catch{}}))
-      .on('error',e=>{res.status(500).send(e.message);})
+    let manual={}; 
+    if(req.body.manual) manual=JSON.parse(req.body.manual);
+    const cta = (manual.ctaText||'Follow for More').replace(/:/g,'');
+    
+    // Railway ke liye simple filter - crash nahi hoga
+    const vf = `scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,eq=saturation=1.2`;
+    const af = `loudnorm=I=-16:TP=-1.5:LRA=11`;
+
+    ffmpeg(input).videoFilters(vf).audioFilters(af).videoBitrate('2500k').outputOptions(['-preset','ultrafast'])
+      .output(output)
+      .on('end',()=> res.download(output,()=>{ try{fs.unlinkSync(output);fs.unlinkSync(input);}catch{}}))
+      .on('error',e=>{ console.log(e); res.status(500).send(e.message); })
       .run();
-  }catch(e){res.status(500).send(e.message);}
+  }catch(e){ res.status(500).send(e.message); }
 });
 
-app.listen(process.env.PORT||3000,()=>console.log('Running'));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT,()=>console.log('Running on '+PORT));

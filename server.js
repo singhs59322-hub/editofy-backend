@@ -1,44 +1,52 @@
 const express = require('express');
 const multer = require('multer');
-const cors = require('cors');
+const ffmpeg = require('fluent-ffmpeg');
+const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 const path = require('path');
 const fs = require('fs');
+const cors = require('cors');
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 3000;
+
+const upload = multer({ dest: 'uploads/' });
+
+// folders banao
+['uploads','edited','public'].forEach(d => {
+  if(!fs.existsSync(d)) fs.mkdirSync(d)
+});
+
+ffmpeg.setFfmpegPath(ffmpegPath);
 
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static('public'));
+app.use('/edited', express.static(path.join(__dirname, 'edited'))));
 
-// uploads folder banao agar nahi hai
-if (!fs.existsSync('uploads')) {
-  fs.mkdirSync('uploads');
-}
+// health check
+app.get('/', (req,res) => res.send('Editofy Backend Running - Upload API ready'));
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, 'uploads/'),
-  filename: (req, file, cb) => cb(null, Date.now() + '-' + file.originalname)
+// MAIN API
+app.post('/api/edit', upload.single('video'), (req, res) => {
+  console.log('Video received:', req.file);
+  if(!req.file) return res.status(400).json({success:false, error: 'No video'});
+
+  const outFile = `edited_${Date.now()}.mp4`;
+  const outPath = path.join(__dirname, 'edited', outFile);
+
+  ffmpeg(req.file.path)
+    .videoFilters('eq=brightness=0.06', 'deshake')
+    .on('end', () => {
+      try{ fs.unlinkSync(req.file.path); }catch(e){}
+      console.log('Edited:', outFile);
+      res.json({ success: true, url: `/edited/${outFile}`, fullUrl: `https://${req.get('host')}/edited/${outFile}` });
+    })
+    .on('error', (err) => {
+      console.log(err);
+      res.json({ success: false, error: err.message });
+    })
+    .save(outPath);
 });
 
-const upload = multer({ storage });
-
-app.get('/', (req, res) => {
-  res.send('EDITOFY AUTO 15 + MANUAL 7 Running - Ready!');
-});
-
-// YE RAHA TERA UPLOAD ROUTE - YAHI MISSING THA
-app.post('/upload', upload.single('videoFile'), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'No file uploaded' });
-  }
-  const fileUrl = `https://${req.get('host')}/uploads/${req.file.filename}`;
-  // Railway pe https force karo
-  const finalUrl = fileUrl.replace('http://', 'https://');
-  res.json({ url: finalUrl, filename: req.file.filename });
-});
-
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
-app.listen(PORT, () => {
-  console.log(`Running on ${PORT}`);
-});
+app.listen(PORT, () => console.log('Running on', PORT));

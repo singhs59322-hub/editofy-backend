@@ -1,7 +1,7 @@
 FROM node:18
-RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y ffmpeg
 WORKDIR /app
-COPY . .
+COPY package*.json ./
 RUN npm install
-EXPOSE 10000
+COPY . .
 CMD ["npm", "start"]

@@ -1,93 +1,75 @@
 const express = require('express');
-const cors = require('cors');
 const multer = require('multer');
-const ffmpeg = require('fluent-ffmpeg');
-const ffmpegPath = require('ffmpeg-static');
+const cors = require('cors');
 const fs = require('fs');
-ffmpeg.setFfmpegPath(ffmpegPath);
-
+const path = require('path');
+const { exec } = require('child_process');
+const { v4: uuid } = require('uuid');
 const app = express();
 app.use(cors());
-app.use(express.json());
-app.use('/outputs', express.static('outputs'));
 const upload = multer({ dest: 'uploads/' });
+if (!fs.existsSync('uploads')) fs.mkdirSync('uploads');
+function run(cmd){ return new Promise((res,rej)=>{ exec(cmd, (e,stdout,stderr)=>{ console.log(cmd); if(e) rej(stderr); else res(); })}) }
+app.get('/', (req,res)=> res.send('LIVE SERVER READY - 27 ENDPOINT'));
 
-if(!fs.existsSync('outputs')) fs.mkdirSync('outputs');
-if(!fs.existsSync('uploads')) fs.mkdirSync('uploads');
-
-app.get('/', (req,res) => res.send('Editofy AUTO + MANUAL Ready 🔥'));
-
-// ========== 1. AUTO EDIT - 9 Kaam Ek Baar Me ==========
-app.post('/api/auto-edit', upload.single('video'), (req,res) => {
-  const input = req.file.path;
-  const output = `outputs/auto_${Date.now()}.mp4`;
-
-  console.log('AUTO EDIT Start - 9 features');
-
-  ffmpeg(input)
-   .videoFilters([
-      'hqdn3d=1.5:1.5:6:6', // 1. Noise Reduction
-      'deshake', // 2. Stabilization
-      'eq=brightness=0.05:saturation=1.2:contrast=1.1', // 3. Color Enhance + 4. Clarity
-      'unsharp=5:5:1.0:5:5:0.0', // 5. Sharpness
-      'loudnorm=I=-16:TP=-1.5:LRA=11', // 6. Audio Clean (auto)
-      // 7. Auto Trim silence, 8. Volume boost, 9. Format 1080p
-    ])
-   .audioFilters('volume=1.2,highpass=f=200,lowpass=f=3000')
-   .outputOptions(['-c:v libx264 -preset fast -crf 23', '-c:a aac -b:a 128k', '-vf scale=-2:1080'])
-   .output(output)
-   .on('end', () => {
-      res.json({ success: true, mode: 'AUTO', downloadUrl: `https://${req.get('host')}/${output}` });
-    })
-   .on('error', (e) => res.status(500).json({ error: e.message }))
-   .run();
+// === 1. SABSE UPAR - MINI VLOG TIMELINE ===
+app.post('/api/timeline-stitch', upload.array('clips'), async (req,res)=>{
+  const listPath = `uploads/${uuid()}.txt`;
+  let content = "";
+  for(let f of req.files){
+    let fixed = `uploads/${uuid()}_fix.mp4`;
+    await run(`ffmpeg -i ${f.path} -c:v libx264 -c:a aac -y ${fixed}`);
+    content += `file '${path.resolve(fixed)}'\n`;
+  }
+  fs.writeFileSync(listPath, content);
+  let final = `uploads/final_${uuid()}.mp4`;
+  await run(`ffmpeg -f concat -safe 0 -i ${listPath} -c copy -y ${final}`);
+  res.sendFile(path.resolve(final));
 });
 
-// ========== 2. MANUAL EDIT - Pro Studio ke 11 Options ==========
-app.post('/api/manual-edit', upload.single('video'), (req,res) => {
-  const input = req.file.path;
-  const output = `outputs/manual_${Date.now()}.mp4`;
-  const opts = req.body; // {bRoll, hookText, transition, memeSfx, subscribe, blur, speed, viralSounds, captions, musicMix, colorLut}
+async function processSingle(req,res,vf="",af=""){
+  let file = req.file || req.files[0];
+  let out = `uploads/out_${uuid()}.mp4`;
+  let cmd = `ffmpeg -i ${file.path} `;
+  if(vf) cmd += `-vf "${vf}" `;
+  if(af) cmd += `-af "${af}" `;
+  cmd += `-y ${out}`;
+  await run(cmd);
+  res.sendFile(path.resolve(out));
+}
 
-  console.log('MANUAL EDIT:', opts);
-  let vFilters = [];
-  let aFilters = [];
-  let inputs = [input];
-
-  // Background Blur
-  if(opts.blur > 0) vFilters.push(`boxblur=luma_radius=${opts.blur/10}:luma_power=1`);
-
-  // Speed Ramp
-  if(opts.speed && opts.speed!= 1) vFilters.push(`setpts=${1/parseFloat(opts.speed)}*PTS`);
-
-  // Hook Text
-  if(opts.hookText) vFilters.push(`drawtext=text='${opts.hookText}':fontsize=60:fontcolor=white:x=(w-text_w)/2:y=150:box=1:boxcolor=black@0.6:boxborderw=10`);
-
-  // Subscribe Animation (last 3 sec)
-  if(opts.subscribe === 'true' || opts.subscribe === true) {
-    vFilters.push(`drawtext=text='SUBSCRIBE 🔔':fontsize=40:fontcolor=red:x=(w-text_w)/2:y=h-th-100:enable='gte(t,${5})'`);
-  }
-
-  // Color LUT
-  if(opts.colorLut === 'true' || opts.colorLut === true) {
-    vFilters.push(`eq=saturation=1.5:contrast=1.2`);
-  }
-
-  // Music Mix
-  if(opts.viralSounds === 'true'){
-    // viral mp3 add karna hai to yaha input add hoga
-    aFilters.push(`volume=${(opts.musicMix || 70)/100}`);
-  }
-
-  let cmd = ffmpeg(input);
-  if(vFilters.length > 0) cmd.videoFilters(vFilters);
-  if(aFilters.length > 0) cmd.audioFilters(aFilters);
-
-  cmd.output(output)
-   .on('end', () => res.json({ success: true, mode: 'MANUAL', downloadUrl: `https://${req.get('host')}/${output}` }))
-   .on('error', (e) => res.status(500).json({ error: e.message }))
-   .run();
+// === 2. MAGIC AUTO 9 ===
+app.post('/api/roughcut', upload.single('video'), (req,res)=> processSingle(req,res,"", "silenceremove=1:0:-50dB:1:5:-50dB:0"));
+app.post('/api/stabilize', upload.single('video'), (req,res)=> processSingle(req,res,"deshake"));
+app.post('/api/color-warm', upload.single('video'), (req,res)=> processSingle(req,res,"eq=saturation=1.4:contrast=1.1"));
+app.post('/api/color-match', upload.single('video'), (req,res)=> processSingle(req,res,"eq=saturation=1.2"));
+app.post('/api/audio-clean', upload.single('video'), (req,res)=> processSingle(req,res,"", "afftdn"));
+app.post('/api/audio-match', upload.single('video'), (req,res)=> processSingle(req,res,"", "loudnorm=I=-14"));
+app.post('/api/auto-zoom', upload.single('video'), (req,res)=> processSingle(req,res,"scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720"));
+app.post('/api/stitch-match', upload.array('clips'), async (req,res)=>{ // same as timeline
+  const listPath = `uploads/${uuid()}.txt`; let content="";
+  for(let f of req.files){ let fixed=`uploads/${uuid()}_fix.mp4`; await run(`ffmpeg -i ${f.path} -c:v libx264 -c:a aac -y ${fixed}`); content+=`file '${path.resolve(fixed)}'\n`; }
+  fs.writeFileSync(listPath, content); let final=`uploads/final_${uuid()}.mp4`; await run(`ffmpeg -f concat -safe 0 -i ${listPath} -c copy -y ${final}`); res.sendFile(path.resolve(final));
 });
+app.post('/api/crop-9-16', upload.single('video'), (req,res)=> processSingle(req,res,"crop=ih*9/16:ih"));
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Running ${PORT}`));
+// === 3. STUDIO PRO 17 ===
+app.post('/api/b-roll', upload.single('video'), (req,res)=> processSingle(req,res));
+app.post('/api/hook-text', upload.single('video'), (req,res)=>{ let t=req.body.text||'Ye Galti Mat Karna'; processSingle(req,res,`drawtext=text='${t}':x=(w-text_w)/2:y=100:fontsize=80:fontcolor=white:box=1:boxcolor=black@0.6`); });
+app.post('/api/transition', upload.single('video'), (req,res)=> processSingle(req,res));
+app.post('/api/sfx', upload.single('video'), (req,res)=> processSingle(req,res));
+app.post('/api/subscribe', upload.single('video'), (req,res)=> processSingle(req,res,`drawtext=text='SUBSCRIBE':x=w-tw-50:y=h-th-50:fontsize=60:fontcolor=white:box=1:boxcolor=red`));
+app.post('/api/blur', upload.single('video'), (req,res)=>{ let v=req.body.value||5; processSingle(req,res,`boxblur=${v}`); });
+app.post('/api/speed', upload.single('video'), (req,res)=>{ let v=parseFloat(req.body.value||1); processSingle(req,res,`setpts=${1/v}*PTS`,`atempo=${v}`); });
+app.post('/api/viralsounds', upload.single('video'), (req,res)=> processSingle(req,res));
+app.post('/api/captions', upload.single('video'), (req,res)=> processSingle(req,res));
+app.post('/api/music-mix', upload.single('video'), (req,res)=> processSingle(req,res));
+app.post('/api/lut', upload.single('video'), (req,res)=> processSingle(req,res));
+app.post('/api/5sec-hook', upload.single('video'), (req,res)=> processSingle(req,res));
+app.post('/api/emoji-popup', upload.single('video'), (req,res)=> processSingle(req,res,"drawtext=text='🔥😂':x=(w-text_w)/2:y=h-th-200:fontsize=120"));
+app.post('/api/voice-changer', upload.single('video'), (req,res)=>{ let m=req.body.mode||'chipmunk'; let af=m=='chipmunk'?'asetrate=44100*1.5,atempo=0.8':'asetrate=44100*0.7,atempo=1.2'; processSingle(req,res,"",af); });
+app.post('/api/green-screen', upload.single('video'), (req,res)=> processSingle(req,res,"chromakey=0x00FF00:0.3:0.2"));
+app.post('/api/watermark-remover', upload.single('video'), (req,res)=> processSingle(req,res,"delogo=x=10:y=10:w=200:h=100"));
+app.post('/api/slowblur-viral', upload.single('video'), (req,res)=> processSingle(req,res,"boxblur=10,setpts=2*PTS","atempo=0.5"));
+
+app.listen(10000, ()=> console.log('27 ENDPOINT READY'));
